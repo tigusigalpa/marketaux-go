@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a bug in marketaux-go
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never include your API token in the report. It is sent as the
+        `api_token` query parameter, so redact it from URLs you paste.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Expected vs actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Code snippet that reproduces the issue.
+      render: go
+  - type: input
+    id: version
+    attributes:
+      label: SDK version
+      placeholder: v1.0.0
+  - type: input
+    id: go
+    attributes:
+      label: Go version
+      placeholder: go1.26.0
