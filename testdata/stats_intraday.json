@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "date": "2024-11-10T00:00:00.000Z",
+      "data": [
+        { "key": "TSLA", "total_documents": 14, "sentiment_avg": 0.388841356283852 },
+        { "key": "MSFT", "total_documents": 10, "sentiment_avg": 0.3902672976255417 },
+        { "key": "AMZN", "total_documents": 1, "sentiment_avg": 0.7039710283279419 }
+      ]
+    },
+    {
+      "date": "2024-11-09T00:00:00.000Z",
+      "data": [
+        { "key": "AMZN", "total_documents": 0, "sentiment_avg": null },
+        { "key": "MSFT", "total_documents": 0, "sentiment_avg": null },
+        { "key": "TSLA", "total_documents": 0, "sentiment_avg": null }
+      ]
+    }
+  ]
+}

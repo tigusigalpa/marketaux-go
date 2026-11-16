@@ -1,0 +1,32 @@
+{
+  "uuid": "9b9fb67e-9438-4263-815e-ef6a7d36af07",
+  "title": "Bitcoin (BTC/USD), Ethereum (ETH/USD) Crushed as Cryptocurrency Market is Overrun by Sellers",
+  "description": "The cryptocurrency market has been experiencing wild price swings...",
+  "keywords": "",
+  "snippet": "Bitcoin (BTC/USD) Price, Analysis and Chart: Bullish channel is broken...",
+  "url": "https://www.dailyfx.com/forex/market_alert/2021/02/23/Bitcoin-BTCUSD-Ethereum-ETHUSD-Crushed-as-Cryptocurrency-Market-is-Overrun-by-Sellers.html",
+  "image_url": "https://a.c-dn.net/b/2jPuVf/headline_shutterstock_365875643.jpg",
+  "language": "en",
+  "published_at": "2021-02-23T10:30:00.000000Z",
+  "source": "dailyfx.com",
+  "entities": [
+    {
+      "symbol": "BTCUSD",
+      "name": "Bitcoin USD",
+      "exchange": "CC",
+      "exchange_long": "Cryptocurrency",
+      "country": "global",
+      "type": "cryptocurrency",
+      "industry": "N/A",
+      "match_score": 82.04055,
+      "sentiment_score": -0.177075,
+      "highlights": [
+        {
+          "highlight": "<em>Bitcoin</em> (<em>BTC</em>/<em>USD</em>) Price, Analysis and Chart...",
+          "sentiment": -0.6486,
+          "highlighted_in": "main_text"
+        }
+      ]
+    }
+  ]
+}

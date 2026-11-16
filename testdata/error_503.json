@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "maintenance_mode",
+    "message": "The API is currently undergoing maintenance."
+  }
+}

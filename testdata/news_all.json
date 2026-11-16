@@ -1,0 +1,54 @@
+{
+  "meta": { "found": 140037, "returned": 2, "limit": 2, "page": 1 },
+  "data": [
+    {
+      "uuid": "70cb577e-c2dd-4dde-b501-f713823a4939",
+      "title": "Trump wins 2024, markets surge globally",
+      "description": "Global markets experience a significant surge following Trump's victory in the 2024 election.",
+      "keywords": "",
+      "snippet": "Donald Trump has won the 2024 presidential election...",
+      "url": "https://www.killerstartups.com/trump-wins-2024-markets-surge-globally/",
+      "image_url": "https://images.killerstartups.com/wp-content/uploads/2024/11/Trump-Wins.jpg",
+      "language": "en",
+      "published_at": "2024-11-08T01:24:00.000000Z",
+      "source": "killerstartups.com",
+      "relevance_score": null,
+      "entities": [
+        {
+          "symbol": "TSLA",
+          "name": "Tesla, Inc.",
+          "exchange": null,
+          "exchange_long": null,
+          "country": "us",
+          "type": "equity",
+          "industry": "Consumer Cyclical",
+          "match_score": 12.133104,
+          "sentiment_score": 0.7783,
+          "highlights": [
+            {
+              "highlight": "., majority-owned by Trump, and <em>Tesl</em>[+253 characters]",
+              "sentiment": 0.7783,
+              "highlighted_in": "main_text"
+            }
+          ]
+        }
+      ],
+      "similar": []
+    },
+    {
+      "uuid": "9b9fb67e-9438-4263-815e-ef6a7d36af08",
+      "title": "Week in review: markets mixed",
+      "description": null,
+      "keywords": "markets, weekly",
+      "snippet": null,
+      "url": "https://example.com/week-review",
+      "image_url": null,
+      "language": "en",
+      "published_at": "2024-11-09T12:00:00.000Z",
+      "source": "example.com",
+      "relevance_score": null,
+      "entities": [],
+      "similar": []
+    }
+  ]
+}

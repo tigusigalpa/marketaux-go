@@ -1,0 +1,6 @@
+{
+  "meta": { "found": 5327, "returned": 1, "limit": 50, "page": 1 },
+  "data": [
+    { "source_id": "adweek.com-1", "domain": "adweek.com", "language": "en" }
+  ]
+}

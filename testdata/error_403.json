@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "endpoint_access_restricted",
+    "message": "Your current plan does not allow access to this endpoint."
+  }
+}

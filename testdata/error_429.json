@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "rate_limit_reached",
+    "message": "Your account has exceeded the rate limit for this plan."
+  }
+}

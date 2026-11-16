@@ -1,0 +1,8 @@
+{
+  "meta": { "returned": 3, "limit": 100 },
+  "data": [
+    { "key": "TSLA", "total_documents": 14, "sentiment_avg": 0.388841356283852 },
+    { "key": "MSFT", "total_documents": 10, "sentiment_avg": 0.3902672976255417 },
+    { "key": "AMZN", "total_documents": 1, "sentiment_avg": 0.7039710283279419 }
+  ]
+}

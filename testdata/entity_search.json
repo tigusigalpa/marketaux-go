@@ -1,0 +1,14 @@
+{
+  "meta": { "found": 1, "returned": 1, "limit": 50, "page": 1 },
+  "data": [
+    {
+      "symbol": "TSLA",
+      "name": "Tesla, Inc.",
+      "type": "equity",
+      "industry": "Consumer Cyclical",
+      "exchange": null,
+      "exchange_long": null,
+      "country": "us"
+    }
+  ]
+}

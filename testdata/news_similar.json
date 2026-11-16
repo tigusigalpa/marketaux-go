@@ -1,0 +1,33 @@
+{
+  "meta": { "found": 5, "returned": 1, "limit": 3, "page": 1 },
+  "data": [
+    {
+      "uuid": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "title": "Markets rally after election results",
+      "description": "A related take on the market surge.",
+      "keywords": "",
+      "snippet": "Markets worldwide rallied...",
+      "url": "https://example.com/markets-rally",
+      "image_url": null,
+      "language": "en",
+      "published_at": "2024-11-08T03:00:00.000000Z",
+      "source": "example.com",
+      "relevance_score": 0.9123,
+      "entities": [
+        {
+          "symbol": "TSLA",
+          "name": "Tesla, Inc.",
+          "exchange": null,
+          "exchange_long": null,
+          "country": "us",
+          "type": "equity",
+          "industry": "Consumer Cyclical",
+          "match_score": 9.5,
+          "sentiment_score": 0.6,
+          "highlights": []
+        }
+      ],
+      "similar": []
+    }
+  ]
+}

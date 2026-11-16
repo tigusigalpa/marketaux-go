@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "usage_limit_reached",
+    "message": "Your account has reached its usage limit for this plan."
+  }
+}

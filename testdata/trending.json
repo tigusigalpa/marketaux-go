@@ -1,0 +1,7 @@
+{
+  "meta": { "returned": 2, "limit": 100 },
+  "data": [
+    { "key": "NVDA", "total_documents": 22, "sentiment_avg": 0.436025815253908, "score": 3.7920454395721324 },
+    { "key": "NFLX", "total_documents": 10, "sentiment_avg": 0.36096001267433164, "score": 1.5599799973797657 }
+  ]
+}
