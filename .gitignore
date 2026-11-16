@@ -1,0 +1,7 @@
+coverage.out
+coverage.html
+.env
+.idea/
+.vscode/
+bin/
+dist/
