@@ -79,6 +79,6 @@ jobs:
           go-version: stable
           cache: false
       - run: go test -race -coverprofile=coverage.out -covermode=atomic .
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         with:
           files: coverage.out
