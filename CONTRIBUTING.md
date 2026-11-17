@@ -61,7 +61,7 @@ MARKETAUX_API_TOKEN=... go test -tags=integration ./...
    `entities.go`, `sources.go`).
 4. Add a fixture in `testdata/` and tests covering decoding, query encoding
    and validation.
-5. Update the service map in `README.md`/`README.ru.md` and `CHANGELOG.md`.
+5. Update the service map in `README.md` and `CHANGELOG.md`.
 
 ## Rules
 

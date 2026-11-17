@@ -28,8 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Regression tests for HTTP failures, redaction, pagination and rate limiting.
 
 ### Changed
-- Expanded English and Russian guides with examples, parameter reference,
-  timeout budgets, quota behavior and troubleshooting.
+- Expanded the English README with practical recipes, parameter reference,
+  timeout budgets, quota behavior, polling guidance and troubleshooting.
+- Consolidated documentation into the English README and removed the
+  separate translation and language switcher.
 
 ## [1.0.0] - 2026-11-16
 

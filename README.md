@@ -1,22 +1,26 @@
-# marketaux-go
+# Marketaux Golang Client/SDK/Library
+
+![Marketaux Golang Client/SDK/Library](https://i.postimg.cc/3xb1fbV7/marketaux-go-hero-code.jpg)
 
 [![CI](https://github.com/tigusigalpa/marketaux-go/actions/workflows/ci.yml/badge.svg)](https://github.com/tigusigalpa/marketaux-go/actions/workflows/ci.yml)
+[![Tests](https://github.com/tigusigalpa/marketaux-go/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/tigusigalpa/marketaux-go/actions/workflows/test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tigusigalpa/marketaux-go.svg)](https://pkg.go.dev/github.com/tigusigalpa/marketaux-go)
-[![Go Report Card](https://goreportcard.com/badge/github.com/tigusigalpa/marketaux-go)](https://goreportcard.com/report/github.com/tigusigalpa/marketaux-go)
-[![codecov](https://codecov.io/gh/tigusigalpa/marketaux-go/branch/main/graph/badge.svg)](https://codecov.io/gh/tigusigalpa/marketaux-go)
+[![CodeQL](https://github.com/tigusigalpa/marketaux-go/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/tigusigalpa/marketaux-go/actions/workflows/codeql.yml)
+[![Codecov](https://codecov.io/gh/tigusigalpa/marketaux-go/graph/badge.svg)](https://codecov.io/gh/tigusigalpa/marketaux-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-%3E%3D1.23-blue.svg)](go.mod)
+[![GitHub Release](https://img.shields.io/github/v/release/tigusigalpa/marketaux-go?style=flat-square)](https://github.com/tigusigalpa/marketaux-go/releases)
 
-**English** | [Русский](README.ru.md)
+Bring [Marketaux](https://www.marketaux.com) financial news into your Go
+application. Find coverage of the companies you follow, explore sentiment
+over time, or add a news feed to a dashboard. `marketaux-go` turns API
+responses into Go structs and takes care of pagination, retries and request
+limits along the way.
 
-Use [Marketaux](https://www.marketaux.com) financial news in your Go service:
-find articles about a company, follow sentiment across markets, or discover
-which entities are getting attention. `marketaux-go` handles requests,
-pagination and recoverable failures, so you can work with Go structs.
-
-The package covers all 10 documented API endpoints, uses only the standard
-library, and requires Go 1.23 or newer. It is a community SDK, maintained
-independently of Marketaux.
+You can start with a token and one request, then add the configuration your
+application needs. The package covers all 10 documented API endpoints, uses
+only the standard library, and requires Go 1.23 or newer. This is a community
+SDK maintained independently of Marketaux.
 
 Marketaux provides article metadata, entity analysis, short snippets and links
 to publishers. Full article text is not included in the API; see the
@@ -27,7 +31,7 @@ to publishers. Full article text is not included in the API; see the
 - All 10 API endpoints: news feed, similar news, news by UUID, entity stats
   (time series + aggregation), trending entities, entity search, entity
   types, industries, news sources
-- `context.Context` in every method; `Client` is safe for concurrent use
+- Every API request accepts `context.Context`; one client can be shared by goroutines
 - Functional options: timeouts, custom `http.Client`, retries, rate limit,
   logging, response size cap
 - Typed errors compatible with `errors.Is`/`errors.As`
@@ -43,6 +47,8 @@ to publishers. Full article text is not included in the API; see the
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Choosing a Service](#choosing-a-service)
+- [Recipes](#recipes)
 - [Configuration](#configuration)
 - [Service Map](#service-map)
 - [Method Usage](#method-usage)
@@ -53,6 +59,7 @@ to publishers. Full article text is not included in the API; see the
 - [Retries & Rate Limits](#retries--rate-limits)
 - [Plans & Limits](#plans--limits)
 - [Concurrency](#concurrency)
+- [Using the SDK in a Service](#using-the-sdk-in-a-service)
 - [Testing](#testing)
 - [Compatibility](#compatibility)
 - [Security](#security)
@@ -70,9 +77,24 @@ to publishers. Full article text is not included in the API; see the
 
 ## Installation
 
+Add the package to an existing Go module:
+
 ```bash
 go get github.com/tigusigalpa/marketaux-go
 ```
+
+For a new project, create a module first:
+
+```bash
+mkdir marketaux-example
+cd marketaux-example
+go mod init example.com/marketaux-example
+go get github.com/tigusigalpa/marketaux-go
+```
+
+The import path ends in `marketaux-go`, while the Go package is named
+`marketaux`. That is why the examples call `marketaux.NewClient` after
+importing `github.com/tigusigalpa/marketaux-go`.
 
 ## Quick Start
 
@@ -137,9 +159,149 @@ request can return no articles: an empty `page.Data` is a normal result.
 The library does not read environment variables or load `.env` files; your
 application passes the token to `NewClient`.
 
+The quick start asks for English-language news mentioning TSLA or AMZN and
+keeps entity mentions with neutral or positive sentiment. `FilterEntities`
+also trims the returned entity lists to the matching mentions. To see a
+broader feed, remove `SentimentGTE`; to inspect every entity attached to a
+matching article, remove `FilterEntities`.
+
+Your output will change as new articles arrive. If the request succeeds with
+no results, try just `Symbols` and `Languages` first, then add the other
+filters one at a time.
+
+## Choosing a Service
+
+Start with the question your application needs to answer:
+
+| Your goal | Start here | What you get |
+| --- | --- | --- |
+| Show news about a watchlist | `News().All` | A page of articles with entity mentions |
+| Process matching articles across pages | `News().Paginate` | Articles as each page arrives |
+| Reopen an article saved earlier | `News().ByUUID` | One article identified by its UUID |
+| Explore related coverage | `News().Similar` | A page of similar articles |
+| Compare activity or sentiment over time | `Stats().Intraday` | Dated buckets of entity statistics |
+| Summarize a period or find trending entities | `Stats().Aggregation` / `Trending` | Aggregate counts, sentiment and trending scores |
+| Find the right symbol for a company | `Entities().Search` | Names, symbols, exchanges and countries |
+| Discover available filters | `Entities().Types`, `Industries`, `Sources().All` | Metadata you can use in later requests |
+
+An entity is a company or another tracked financial instrument. Symbols are
+the identifiers you pass to news and stats filters. If a company name gives
+unexpected results, use entity search to check the symbol, country and
+exchange before building the query. The [service map](#service-map) lists the
+HTTP endpoint and documentation for every method.
+
+## Recipes
+
+These functions build on the quick start. They accept an existing client so
+you can use the same connection pool and rate limiter throughout your app.
+The snippets use the `context`, `fmt` and `time` packages where needed.
+
+### Collect a small watchlist feed
+
+For a dashboard or a periodic digest, it is often useful to collect a bounded
+number of pages. This function fetches at most three pages of three articles
+each, with the matching entities kept in the response:
+
+```go
+func watchlistNews(ctx context.Context, client *marketaux.Client, symbols []string) ([]marketaux.Article, error) {
+	if len(symbols) == 0 {
+		return nil, fmt.Errorf("provide at least one watchlist symbol")
+	}
+	return client.News().AllPages(ctx, marketaux.NewsParams{
+		Symbols:        symbols,
+		Languages:      []string{"en"},
+		FilterEntities: marketaux.Bool(true),
+		Limit:          3,
+	}, 3)
+}
+```
+
+For example, pass `[]string{"TSLA", "AMZN"}` as `symbols`. The result may
+contain fewer than nine articles. `AllPages` returns an error if any page
+fails; use the iterator below when you want to handle each article as it arrives.
+
+### Process yesterday's articles without collecting them all
+
+A daily job can select a calendar date and pass each article to your own
+handler. Calculate the date in UTC, since the SDK sends dates in UTC too:
+
+```go
+func processYesterday(ctx context.Context, client *marketaux.Client, handle func(marketaux.Article) error) error {
+	if handle == nil {
+		return fmt.Errorf("provide an article handler")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	yesterday := time.Now().UTC().AddDate(0, 0, -1)
+	for article, err := range client.News().Paginate(ctx, marketaux.NewsParams{
+		Languages:   []string{"en"},
+		PublishedOn: marketaux.Date(yesterday.Year(), yesterday.Month(), yesterday.Day()),
+		Limit:       3,
+	}) {
+		if err != nil {
+			return err
+		}
+		if err := handle(article); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+```
+
+The 30-second context covers requests, retries and page transitions. Your
+handler runs synchronously; if it does slow work, pass a context to that work
+too. A failure leaves previously handled articles in your application, so
+store their UUIDs if rerunning the job should skip duplicates. An iterator
+can still use many requests: narrow the filters to fit your daily quota.
+
+### Read a week of daily sentiment
+
+Stats return buckets rather than articles. This example requests the previous
+seven UTC calendar days and checks for missing sentiment before printing it.
+It requires access to the stats endpoints:
+
+```go
+func printDailySentiment(ctx context.Context, client *marketaux.Client, symbols []string) error {
+	if len(symbols) == 0 {
+		return fmt.Errorf("provide at least one symbol")
+	}
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	series, err := client.Stats().Intraday(ctx, marketaux.StatsParams{
+		Symbols:         symbols,
+		Interval:        marketaux.IntervalDay,
+		GroupBy:         marketaux.GroupBySymbol,
+		PublishedAfter:  marketaux.Time(today.AddDate(0, 0, -7)),
+		PublishedBefore: marketaux.Time(today),
+		DateOrder:       marketaux.DateOrderAsc,
+	})
+	if err != nil {
+		return err
+	}
+	for _, point := range series.Data {
+		for _, stat := range point.Data {
+			if stat.SentimentAvg == nil {
+				fmt.Printf("%s %s: no sentiment available\n", point.Date.Format("2006-01-02"), stat.Key)
+				continue
+			}
+			fmt.Printf("%s %s: %d documents, sentiment %.3f\n",
+				point.Date.Format("2006-01-02"), stat.Key, stat.TotalDocuments, *stat.SentimentAvg)
+		}
+	}
+	return nil
+}
+```
+
+Missing sentiment is different from a score of zero: zero is a reported
+neutral value. Keep that distinction when you build a chart or calculate
+your own summaries.
+
 ## Configuration
 
-`NewClient(token, opts...)` accepts functional options:
+Start with the defaults unless you need different behavior. Each option
+changes one part of the client and is applied when `NewClient` runs:
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -224,8 +386,10 @@ complete programs.
 
 ### News feed — `News().All(ctx, NewsParams)`
 
-Latest world financial news with entity analysis (match score, sentiment,
-highlights). Docs: <https://www.marketaux.com/documentation#finance-news>
+Use this for the main article feed. Each article can include entity matches,
+sentiment and highlighted mentions. The example below combines several
+filters to show the available controls; for your first request, choose only
+the ones you need. Docs: <https://www.marketaux.com/documentation#finance-news>
 
 ```go
 page, err := client.News().All(ctx, marketaux.NewsParams{
@@ -263,10 +427,10 @@ for _, article := range page.Data {
 Search operators: `+` (AND), `|` (OR), `-` (negation), `"..."` (exact phrase),
 `*` suffix (prefix), `()` (grouping), `\` (escape). Example: `"ipo" -nyse`.
 
-Note: the API returns a `snippet` and a link — never the full article text
-(see [Marketaux FAQ](https://www.marketaux.com/faq)). Also, the documented
-sort value is `published_on` while the response field is `published_at`; the
-SDK follows the documentation literally.
+The documented date-sort value is `published_on`, while the timestamp in an
+article is named `published_at`. The SDK keeps those API names, so use
+`NewsSortPublishedOn` when constructing a request and `Article.PublishedAt`
+when reading a response.
 
 ### Similar news — `News().Similar(ctx, uuid, SimilarParams)`
 
@@ -288,8 +452,10 @@ fmt.Println(len(similar.Data), "similar articles")
 
 ### News by UUID — `News().ByUUID(ctx, uuid)`
 
-A single article previously saved by UUID. Returns `ErrNotFound` for missing
-articles. Docs: <https://www.marketaux.com/documentation#news-by-uuid>
+Save an article's UUID when you need to look it up again later. This method
+returns the article directly, without a `Data` envelope, and returns
+`ErrNotFound` for a missing article.
+Docs: <https://www.marketaux.com/documentation#news-by-uuid>
 
 ```go
 article, err := client.News().ByUUID(ctx,
@@ -332,8 +498,9 @@ quarter/year 10y. Longer periods are silently truncated by the server — see
 
 ### Entity stats aggregation — `Stats().Aggregation(ctx, AggregationParams)`
 
-Same filters as the time series, aggregated over a single period. The
-response `Meta` only carries `Returned` and `Limit`.
+Use aggregation when you need a summary for a period rather than a chart
+with one point per interval. It shares the time-series filters but omits
+`Interval` and `DateOrder`. The response `Meta` carries `Returned` and `Limit`.
 Docs: <https://www.marketaux.com/documentation#entity-aggregation>
 
 ```go
@@ -350,7 +517,8 @@ for _, stat := range agg.Data {
 
 ### Trending entities — `Stats().Trending(ctx, TrendingParams)`
 
-Entities gaining traction over the period, ranked by `Score`.
+Find entities gaining attention during the requested period. Each result
+includes a trending `Score` alongside document counts and average sentiment.
 Docs: <https://www.marketaux.com/documentation#trending-aggregation>
 
 ```go
@@ -416,8 +584,9 @@ the SDK makes a request on every call.
 
 ### News sources — `Sources().All(ctx, SourcesParams)`
 
-News sources usable in `domains`/`source_ids` filters. Page limit fixed at
-50; `DistinctDomain` groups by unique domain (`SourceID` becomes `nil`).
+Use this catalog to discover values for `Domains` and `SourceIDs` filters.
+The page size is fixed at 50. `DistinctDomain` groups by domain, in which
+case `SourceID` can be `nil`.
 Docs: <https://www.marketaux.com/documentation#sources>
 
 ```go
@@ -434,6 +603,10 @@ for _, source := range src.Data {
 ```
 
 ## Reading Responses
+
+List methods return a response envelope. Read its `Data` field for the
+results and `Meta` for page information. `ByUUID`, `Types` and `Industries`
+return their values directly:
 
 | Method | Result | Useful fields |
 | --- | --- | --- |
@@ -467,7 +640,23 @@ Unknown entity types in responses are preserved. `Entity.TypeKnown()` or
 `EntityType.Valid()` tells you whether the SDK recognizes a value. Unknown
 JSON fields are ignored for forward compatibility.
 
+### Keep article identity separate from display fields
+
+Store `Article.UUID` when you need to recognize an article again, and keep
+`Article.URL` as the link you show readers. A title is useful for display but
+is a poor duplicate key: different articles can share similar titles.
+`Article.Similar` contains related coverage when grouping is enabled; it is
+separate from the top-level `Data` list that pagination walks.
+
+The SDK returns the data supplied by the API. It does not persist articles,
+deduplicate repeated polls, or refresh previously returned structs. Your
+application decides what to store and how long to cache it.
+
 ## Params & Validation
+
+Parameter structs keep request construction close to the API while letting
+you use Go values. Leave a field at its zero value when you want the server
+default; use the pointer helpers when an explicit false or numeric zero matters.
 
 - Optional booleans/floats use pointers (`*bool`, `*float64`) so `nil` means
   "not sent" — the API applies your plan defaults. Helpers: `marketaux.Bool`,
@@ -556,6 +745,8 @@ languages.
 
 ## Pagination
 
+Use `All` when one page is enough, `Paginate` when you want to process results
+as they arrive, and `AllPages` when you need a slice with a page budget.
 `Paginate` returns an `iter.Seq2` iterator that fetches pages lazily:
 
 ```go
@@ -599,6 +790,23 @@ matching result set. `AllPages` holds the results in memory and discards
 partial results on error. With `Paginate`, you keep anything already handled.
 Each fetched page, and potentially each retry, uses another API request.
 Similar news supports manual pagination through `SimilarParams.Page`.
+
+### Polling a changing feed
+
+A news feed can change between requests. New arrivals can move articles
+between page numbers while your application is walking the results. The
+iterator follows page numbers; it does not create a snapshot of the feed.
+
+For a periodic job, keep a record of handled UUIDs and use an explicit date
+window. If you deliberately overlap successive windows, skip UUIDs you have
+already stored. This makes repeated polling easier to recover after a
+failure. Choose the overlap and retention period for your application; the
+SDK does not maintain a polling cursor.
+
+For historical work, divide large queries into smaller date windows and
+monitor how many results each window contains. Reaching the pagination
+boundary is a reason to narrow the query before assuming you have collected
+the full matching set.
 
 ## Error Handling
 
@@ -657,14 +865,26 @@ A client timeout matches both `ErrTimeout` and `ErrTransport`. An expired
 caller context matches `context.DeadlineExceeded` instead. Check the context
 errors separately when deciding whether to retry at the application level.
 
+Treat a validation error as feedback about the request you constructed.
+Retrying the same parameters will not fix it. An API error describes a
+response from Marketaux, so the next step depends on the status: check the
+token for 401, endpoint access for 403, and account quota for 402. For a
+temporary failure, remember that the SDK may already have used its configured
+retry attempts before returning control to you.
+
+When reporting a problem, the error class, HTTP status and request ID are
+usually more useful than a complete request URL. Keep response previews in
+private diagnostics, since they may contain details of your query even after
+the token has been masked.
+
 ## Retries & Rate Limits
 
 `DefaultRetryPolicy`: 3 attempts total, 500 ms base delay, 8 s backoff cap.
 Jitter chooses a delay between 50% and 100% of that backoff (equal jitter).
 Retried: `429`, `500`, `502`, `503`, `504` and network errors. Not retried:
 `4xx` (except 429), timeouts, oversized responses, decode errors and canceled
-contexts. `Retry-After` (seconds or
-HTTP-date) takes precedence when longer than the computed backoff.
+contexts. `Retry-After` (seconds or HTTP-date) takes precedence when longer
+than the computed backoff.
 
 Copy the default policy before changing it, or use a policy with one attempt
 to disable retries:
@@ -694,6 +914,18 @@ processes or enforce a shared account's daily quota. Cancellation interrupts
 waiting without reserving future capacity. Retried requests can consume your
 daily quota, so choose a policy that fits your workload.
 
+### Budget requests before increasing concurrency
+
+Page size, request rate and daily quota solve different problems. A larger
+page can reduce the number of requests needed to walk a result set, if your
+plan allows it. A rate limiter spaces attempts over time. Neither one adds
+more requests to your account's daily allowance.
+
+For example, processing five pages takes five HTTP attempts when every page
+succeeds immediately. If one page needs two extra attempts, the operation
+can make seven attempts. Plan for that headroom when you run several jobs
+with the same account, and avoid retrying a daily-quota error in a tight loop.
+
 ## Plans & Limits
 
 Monthly billing prices and limits checked on 17 November 2026. Pricing can
@@ -722,6 +954,35 @@ slices/pointer values while requests use them. Responses belong to the caller.
 `CloseIdleConnections` releases idle connections in the underlying transport;
 it does not cancel active requests or permanently close the client. With a
 shared transport, this can also close its other idle connections.
+
+## Using the SDK in a Service
+
+Create the client when your application starts and keep it with the other
+shared dependencies. Pass the incoming request's context to SDK methods.
+For a background job, derive a context from the worker's lifecycle and add
+a deadline for each run. That gives shutdown and cancellation a clear path
+through request waits and retries.
+
+Choose timeouts around the amount of work you expect. A single-page web
+request usually needs a different budget from an overnight import. If both
+use the same client, their contexts can give them different overall budgets
+without changing the shared client configuration.
+
+Keep persistence and caching in your application. Cache type and industry
+lists when that fits your freshness requirements, store article UUIDs for
+repeatable processing, and decide whether news pages should be cached for
+your readers. The SDK issues a request each time a service method is called;
+it does not schedule refreshes or share a cache between callers.
+
+At shutdown, cancel your workers and wait for active work to finish before
+calling `CloseIdleConnections`. Call it for application cleanup rather than
+after every request, so the connection pool can do its job.
+
+For a local test server, pass its URL through `WithBaseURL` and use
+`WithRetry(RetryPolicy{MaxAttempts: 1})` when you want one attempt per test.
+The repository's [client tests](client_test.go) and
+[request-pipeline tests](pipeline_test.go) show complete examples using the
+standard library's `httptest` package.
 
 ## Testing
 
@@ -772,6 +1033,10 @@ public API backward compatible.
 
 ## Troubleshooting
 
+When a request surprises you, start with the error class and the simplest
+query that should work. Add filters back gradually, check the response's
+`Meta`, and enable redacted debug logging if you need to see the attempts.
+
 | What you see | What to check |
 | --- | --- |
 | `ErrInvalidConfig` | Token is set; timeout is positive; `WithHTTPClient` precedes `WithTimeout` if the custom client has no timeout |
@@ -784,6 +1049,23 @@ public API backward compatible.
 | No debug logs | Supply `WithLogger`, enable debug in its handler, then set `WithDebug(true)` |
 | `ErrDecode` | Inspect the redacted preview; a proxy may have returned HTML or unexpected JSON |
 | `ErrResponseTooLarge` | Reduce result size or deliberately raise `WithMaxResponseBytes` |
+
+### When the articles look right but the entities do not
+
+An article can match your watchlist and still mention several other
+companies. Without `FilterEntities`, those other mentions remain in its
+`Entities` list. Check which symbol each score belongs to before displaying
+it as sentiment for your watchlist. Entity search can also help distinguish
+instruments with similar names on different exchanges.
+
+### When a job stops halfway through
+
+Decide whether to keep partial work before choosing between an iterator and
+`AllPages`. A handler called from `Paginate` may already have written several
+articles when a later request fails. `AllPages` returns no collected slice
+on error. You can start another iterator at a chosen `Page`, but page
+contents may have moved in a live feed. A date window and stored UUIDs give
+your application more control over reprocessing.
 
 ## Examples
 
@@ -811,8 +1093,11 @@ repository. Stats examples need access to the stats endpoints.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and feature requests are
-welcome in GitHub issues — never include your API token.
+Found a surprising response or a missing example? Open an issue with the
+method you called, the error or status you received, your Go version and a
+small reproducer. Remove tokens and private query data first. For code
+changes and local checks, see [CONTRIBUTING.md](CONTRIBUTING.md); report
+security issues through [SECURITY.md](SECURITY.md).
 
 ## License
 
