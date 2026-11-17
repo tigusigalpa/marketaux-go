@@ -23,6 +23,9 @@ func TestRedactURL(t *testing.T) {
 			"https://api.marketaux.com/v1/news/all?limit=3",
 			"limit=3",
 		},
+		{"invalid escape", "https://example.com?api_token=secret%ZZ&limit=3", "api_token=%2A%2A%2A"},
+		{"encoded key and invalid value", "https://example.com?api%5Ftoken=secret%ZZ", "api%5Ftoken=%2A%2A%2A"},
+		{"semicolon in query", "https://example.com?api_token=secret;bad&limit=3", "limit=3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

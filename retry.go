@@ -2,6 +2,7 @@ package marketaux
 
 import (
 	"context"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"strconv"
@@ -19,7 +20,7 @@ type RetryPolicy struct {
 	BaseDelay time.Duration
 	// MaxDelay caps the exponential backoff.
 	MaxDelay time.Duration
-	// Jitter adds full jitter (50-100% of the computed delay) when true.
+	// Jitter randomizes the delay to 50-100% of the computed backoff.
 	Jitter bool
 }
 
@@ -49,18 +50,18 @@ func (p RetryPolicy) validate() error {
 // 1-based number of the attempt that just failed), honoring Retry-After.
 func (p RetryPolicy) delay(attempt int, retryAfter time.Duration) time.Duration {
 	d := p.BaseDelay
-	for i := 1; i < attempt; i++ {
-		d *= 2
-		if d >= p.MaxDelay {
+	for i := 1; i < attempt && d > 0; i++ {
+		if d >= p.MaxDelay-d {
 			d = p.MaxDelay
 			break
 		}
+		d *= 2
 	}
 	if d > p.MaxDelay {
 		d = p.MaxDelay
 	}
 	if p.Jitter && d > 0 {
-		// Full jitter in the 0.5..1.0 range of the computed delay.
+		// Equal jitter in the 0.5..1.0 range of the computed delay.
 		// #nosec G404 -- jitter randomness is not security-sensitive.
 		d = d/2 + time.Duration(rand.Int64N(int64(d/2)+1))
 	}
@@ -93,6 +94,9 @@ func parseRetryAfter(h string, now time.Time) time.Duration {
 	if secs, err := strconv.ParseInt(h, 10, 64); err == nil {
 		if secs <= 0 {
 			return 0
+		}
+		if secs > math.MaxInt64/int64(time.Second) {
+			return time.Duration(math.MaxInt64)
 		}
 		return time.Duration(secs) * time.Second
 	}

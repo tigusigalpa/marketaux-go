@@ -10,11 +10,13 @@ import (
 
 // Sentinel errors. Use errors.Is to classify failures returned by the client.
 var (
-	ErrInvalidConfig    = errors.New("marketaux: invalid configuration")
-	ErrValidation       = errors.New("marketaux: validation error")
-	ErrTransport        = errors.New("marketaux: transport error")
-	ErrTimeout          = errors.New("marketaux: request timeout")
-	ErrDecode           = errors.New("marketaux: response decode error")
+	ErrInvalidConfig = errors.New("marketaux: invalid configuration")
+	ErrValidation    = errors.New("marketaux: validation error")
+	ErrTransport     = errors.New("marketaux: transport error")
+	ErrTimeout       = errors.New("marketaux: request timeout")
+	ErrDecode        = errors.New("marketaux: response decode error")
+	// ErrResponseTooLarge reports a response exceeding WithMaxResponseBytes.
+	ErrResponseTooLarge = errors.New("marketaux: response body too large")
 	ErrBadRequest       = errors.New("marketaux: bad request")
 	ErrUnauthorized     = errors.New("marketaux: invalid api token")
 	ErrUsageLimit       = errors.New("marketaux: usage limit reached")
@@ -71,7 +73,7 @@ func (e *ValidationError) Error() string {
 func (e *ValidationError) Is(target error) bool { return target == ErrValidation }
 
 // APIError is an error response returned by the Marketaux API. It is produced
-// for every HTTP response with a status code >= 400.
+// for every HTTP response outside the 2xx range, including unfollowed redirects.
 type APIError struct {
 	StatusCode      int
 	Code            string

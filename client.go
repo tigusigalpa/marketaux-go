@@ -88,6 +88,20 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 	if c.maxResponseBytes <= 0 {
 		return nil, &ConfigError{Field: "maxResponseBytes", Reason: "must be > 0"}
 	}
+	checkRedirect := c.httpClient.CheckRedirect
+	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) > 0 && (req.URL.Scheme != via[0].URL.Scheme ||
+			!strings.EqualFold(req.URL.Host, via[0].URL.Host)) {
+			return errors.New("marketaux: cross-origin redirects are not allowed")
+		}
+		if checkRedirect != nil {
+			return checkRedirect(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
 
 	c.news = &NewsService{c: c}
 	c.stats = &StatsService{c: c}
@@ -116,9 +130,7 @@ func (c *Client) BaseURL() string { return c.baseURL.String() }
 // CloseIdleConnections closes idle keep-alive connections held by the
 // underlying HTTP transport, when supported.
 func (c *Client) CloseIdleConnections() {
-	if tr, ok := c.httpClient.Transport.(interface{ CloseIdleConnections() }); ok {
-		tr.CloseIdleConnections()
-	}
+	c.httpClient.CloseIdleConnections()
 }
 
 // get performs an authenticated GET request and decodes the JSON body into
@@ -135,16 +147,18 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	u := c.baseURL.ResolveReference(&url.URL{Path: strings.TrimSuffix(c.baseURL.Path, "/") + path})
 	u.RawQuery = query.Encode()
 	full := u.String()
-	redactedURL := RedactURL(full)
-
-	if c.limiter != nil {
-		if err := c.limiter.wait(ctx); err != nil {
-			return err
-		}
-	}
+	redactedURL := c.redactSecret(RedactURL(full))
 
 	var lastErr error
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if c.limiter != nil {
+			if err := c.limiter.wait(ctx); err != nil {
+				return err
+			}
+		}
 		if attempt > 1 {
 			c.logDebug(ctx, "retrying request",
 				slog.Int("attempt", attempt),
@@ -177,7 +191,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 func (c *Client) doOnce(ctx context.Context, full, redactedURL string, out any) (int, time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
 	if err != nil {
-		return 0, 0, &TransportError{Err: err, URL: redactedURL}
+		return 0, 0, &TransportError{Err: c.safeError(err), URL: redactedURL}
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
@@ -188,7 +202,7 @@ func (c *Client) doOnce(ctx context.Context, full, redactedURL string, out any) 
 			return 0, 0, ctx.Err()
 		}
 		return 0, 0, &TransportError{
-			Err:     unwrapNetErr(err),
+			Err:     c.safeError(unwrapNetErr(err)),
 			URL:     redactedURL,
 			Timeout: isTimeoutErr(err),
 		}
@@ -197,23 +211,29 @@ func (c *Client) doOnce(ctx context.Context, full, redactedURL string, out any) 
 
 	body, err := readBody(resp.Body, c.maxResponseBytes)
 	if err != nil {
-		drain(resp.Body)
-		return resp.StatusCode, 0, &TransportError{Err: err, URL: redactedURL}
+		if ctx.Err() != nil {
+			return resp.StatusCode, 0, ctx.Err()
+		}
+		return resp.StatusCode, 0, &TransportError{
+			Err: c.safeError(err), URL: redactedURL, Timeout: isTimeoutErr(err),
+		}
 	}
-	drain(resp.Body)
 
-	if resp.StatusCode >= 400 {
-		apiErr := newAPIError(resp, body, redactedURL)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		apiErr := newAPIError(resp, []byte(c.redactSecret(string(body))), redactedURL)
+		apiErr.RequestID = c.redactSecret(apiErr.RequestID)
+		apiErr.RateLimitLimit = c.redactSecret(apiErr.RateLimitLimit)
+		apiErr.UsageLimitLimit = c.redactSecret(apiErr.UsageLimitLimit)
 		return resp.StatusCode, apiErr.RetryAfter, apiErr
 	}
 
 	if err := json.Unmarshal(body, out); err != nil {
-		preview := body
+		preview := []byte(c.redactSecret(string(body)))
 		if len(preview) > decodeBodyPreview {
 			preview = preview[:decodeBodyPreview]
 		}
 		return resp.StatusCode, 0, &DecodeError{
-			Err:  err,
+			Err:  c.safeError(err),
 			URL:  redactedURL,
 			Body: append([]byte(nil), preview...),
 		}
@@ -223,20 +243,22 @@ func (c *Client) doOnce(ctx context.Context, full, redactedURL string, out any) 
 
 // readBody reads r up to limit+1 bytes and fails when the body exceeds limit.
 func readBody(r io.Reader, limit int64) ([]byte, error) {
-	lr := &io.LimitedReader{R: r, N: limit + 1}
+	lr := &io.LimitedReader{R: r, N: limit}
 	body, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
 	}
 	if lr.N == 0 {
-		return nil, fmt.Errorf("response body exceeds %d bytes", limit)
+		var extra [1]byte
+		n, err := io.ReadFull(r, extra[:])
+		if n > 0 {
+			return nil, fmt.Errorf("%w: limit is %d bytes", ErrResponseTooLarge, limit)
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
 	}
 	return body, nil
-}
-
-// drain consumes what is left of the body so the connection can be reused.
-func drain(r io.Reader) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(r, 1<<20))
 }
 
 // newAPIError builds an APIError from an HTTP error response.
@@ -279,6 +301,10 @@ func firstHeader(h http.Header, names ...string) string {
 
 // isRetryable reports whether err justifies another attempt.
 func isRetryable(err error) bool {
+	if errors.Is(err, ErrResponseTooLarge) || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return retryableStatus(apiErr.StatusCode)

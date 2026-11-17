@@ -9,9 +9,18 @@
 
 **English** | [Русский](README.ru.md)
 
-Idiomatic, zero-dependency Go client for the [Marketaux](https://www.marketaux.com)
-financial news API. Covers all 10 documented endpoints with typed params,
-typed errors and context-first design — standard library only.
+Use [Marketaux](https://www.marketaux.com) financial news in your Go service:
+find articles about a company, follow sentiment across markets, or discover
+which entities are getting attention. `marketaux-go` handles requests,
+pagination and recoverable failures, so you can work with Go structs.
+
+The package covers all 10 documented API endpoints, uses only the standard
+library, and requires Go 1.23 or newer. It is a community SDK, maintained
+independently of Marketaux.
+
+Marketaux provides article metadata, entity analysis, short snippets and links
+to publishers. Full article text is not included in the API; see the
+[Marketaux FAQ](https://www.marketaux.com/faq).
 
 ## Features
 
@@ -25,7 +34,7 @@ typed errors and context-first design — standard library only.
 - Automatic retries with exponential backoff, jitter and `Retry-After`
 - Client-side token-bucket rate limiter
 - Lazy pagination via `iter.Seq2` (Go 1.23+)
-- Client-side validation of all documented parameters
+- Typed parameters with client-side checks for invalid values and combinations
 - API token redaction in errors and debug logs
 - **Zero external dependencies**
 
@@ -37,6 +46,7 @@ typed errors and context-first design — standard library only.
 - [Configuration](#configuration)
 - [Service Map](#service-map)
 - [Method Usage](#method-usage)
+- [Reading Responses](#reading-responses)
 - [Params & Validation](#params--validation)
 - [Pagination](#pagination)
 - [Error Handling](#error-handling)
@@ -46,14 +56,17 @@ typed errors and context-first design — standard library only.
 - [Testing](#testing)
 - [Compatibility](#compatibility)
 - [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [Examples](#examples)
 - [Endpoint Documentation](#endpoint-documentation)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Requirements
 
-- Go 1.23+
-- A Marketaux API token — get one at <https://www.marketaux.com/register>
+- Go 1.23+; use a currently supported, patched Go release for production.
+- A [Marketaux API token](https://www.marketaux.com/register). The news
+  quick start uses a limit of 3 to fit the Free plan.
 
 ## Installation
 
@@ -63,6 +76,20 @@ go get github.com/tigusigalpa/marketaux-go
 
 ## Quick Start
 
+Set your token in the shell where you run the program:
+
+```bash
+export MARKETAUX_API_TOKEN='your-token'
+```
+
+On PowerShell:
+
+```powershell
+$env:MARKETAUX_API_TOKEN = 'your-token'
+```
+
+Save the following as `main.go` in your own Go module, then run `go run .`:
+
 ```go
 package main
 
@@ -71,6 +98,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/tigusigalpa/marketaux-go"
 )
@@ -81,12 +109,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	page, err := client.News().All(context.Background(), marketaux.NewsParams{
+	defer client.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	page, err := client.News().All(ctx, marketaux.NewsParams{
 		Symbols:        []string{"TSLA", "AMZN"},
 		Languages:      []string{"en"},
 		FilterEntities: marketaux.Bool(true),
 		SentimentGTE:   marketaux.Float64(0),
-		Limit:          50,
+		Limit:          3,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -100,6 +132,11 @@ func main() {
 }
 ```
 
+Create one client and reuse it across requests and goroutines. A successful
+request can return no articles: an empty `page.Data` is a normal result.
+The library does not read environment variables or load `.env` files; your
+application passes the token to `NewClient`.
+
 ## Configuration
 
 `NewClient(token, opts...)` accepts functional options:
@@ -107,8 +144,8 @@ func main() {
 | Option | Default | Description |
 | --- | --- | --- |
 | `WithBaseURL(raw)` | `https://api.marketaux.com/v1` | Custom API base (tests, proxies) |
-| `WithHTTPClient(hc)` | `http.Client{Timeout: 30s}` | Custom HTTP client (not mutated) |
-| `WithTimeout(d)` | `30s` | Per-request timeout |
+| `WithHTTPClient(hc)` | `http.Client{Timeout: 30s}` | Shallow copy; transport and cookie jar stay shared |
+| `WithTimeout(d)` | `30s` | Timeout for each HTTP attempt, including reading its body |
 | `WithUserAgent(ua)` | `marketaux-go/1.0.0` | `User-Agent` header |
 | `WithRetry(p)` | `DefaultRetryPolicy` | Retry policy, `MaxAttempts=1` disables |
 | `WithRateLimit(rps, burst)` | off | Client-side token bucket |
@@ -117,16 +154,50 @@ func main() {
 | `WithMaxResponseBytes(n)` | `32 MiB` | Response body size cap |
 
 Environment variables used by examples: `MARKETAUX_API_TOKEN`,
-`MARKETAUX_BASE_URL` (optional, smoke test only).
+`MARKETAUX_BASE_URL` (optional, smoke example and integration test).
+
+Options are applied from left to right. A custom HTTP client must have a
+positive `Timeout`, or be followed by `WithTimeout`. For example:
 
 ```go
 client, err := marketaux.NewClient(token,
-	marketaux.WithTimeout(30*time.Second),
-	marketaux.WithRetry(marketaux.DefaultRetryPolicy),
+	marketaux.WithHTTPClient(&http.Client{Transport: http.DefaultTransport}),
+	marketaux.WithTimeout(10*time.Second),
 	marketaux.WithRateLimit(5, 2),
+)
+if err != nil {
+	return err
+}
+```
+
+`WithTimeout` applies to one attempt. Use `context.WithTimeout` to bound the
+whole operation, including time spent waiting for rate limits and retries.
+For an iterator, that context covers the entire walk through the pages.
+
+To see request logs, provide a logger whose handler accepts debug messages:
+
+```go
+logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	Level: slog.LevelDebug,
+}))
+client, err := marketaux.NewClient(token,
+	marketaux.WithLogger(logger),
 	marketaux.WithDebug(true),
 )
+if err != nil {
+	return err
+}
 ```
+
+Logging is discarded by default. `WithDebug(true)` alone does not create an
+output destination. The SDK logs the method, redacted URL, status, attempt
+number and duration; it does not log response bodies.
+
+`WithBaseURL` accepts an HTTP(S) URL, keeps its path prefix and removes its
+query and fragment. Use HTTPS outside local tests. URLs with embedded user
+credentials are rejected. Redirects may stay on the same origin; a change of
+scheme, host or port is rejected before the next request is sent, even with
+a custom `CheckRedirect` callback.
 
 ## Service Map
 
@@ -146,6 +217,10 @@ client, err := marketaux.NewClient(token,
 Errors: <https://www.marketaux.com/documentation#errors>
 
 ## Method Usage
+
+The snippets below assume an existing `client` and `ctx`, inside a function
+that returns an error. The [examples directory](examples/README.md) contains
+complete programs.
 
 ### News feed — `News().All(ctx, NewsParams)`
 
@@ -170,6 +245,12 @@ page, err := client.News().All(ctx, marketaux.NewsParams{
 	Limit:            50,
 	Page:             1,
 })
+if err != nil {
+	return err
+}
+for _, article := range page.Data {
+	fmt.Println(article.Title, article.PublishedAt, article.URL)
+}
 ```
 
 `NewsParams` fields map 1:1 to the documented query parameters: `symbols`,
@@ -199,6 +280,10 @@ similar, err := client.News().Similar(ctx,
 	"70cb577e-c2dd-4dde-b501-f713823a4939",
 	marketaux.SimilarParams{Limit: 10},
 )
+if err != nil {
+	return err
+}
+fmt.Println(len(similar.Data), "similar articles")
 ```
 
 ### News by UUID — `News().ByUUID(ctx, uuid)`
@@ -209,6 +294,10 @@ articles. Docs: <https://www.marketaux.com/documentation#news-by-uuid>
 ```go
 article, err := client.News().ByUUID(ctx,
 	"9b9fb67e-9438-4263-815e-ef6a7d36af07")
+if err != nil {
+	return err
+}
+fmt.Println(article.Title, article.Snippet)
 ```
 
 ### Entity stats time series — `Stats().Intraday(ctx, StatsParams)`
@@ -225,10 +314,16 @@ series, err := client.Stats().Intraday(ctx, marketaux.StatsParams{
 	GroupBy:         marketaux.GroupBySymbol,
 	Countries:       []string{"us"},
 	PublishedAfter:  marketaux.Date(2026, time.October, 1),
-	PublishedBefore: marketaux.Date(2026, time.October, 31),
+	PublishedBefore: marketaux.Date(2026, time.November, 1),
 	Sort:            marketaux.StatsSortTotalDocuments,
 	DateOrder:       marketaux.DateOrderDesc,
 })
+if err != nil {
+	return err
+}
+for _, point := range series.Data {
+	fmt.Println(point.Date, point.Data)
+}
 ```
 
 Maximum look-back per interval: minute 7d, hour 31d, day 3y, week/month 5y,
@@ -245,6 +340,12 @@ Docs: <https://www.marketaux.com/documentation#entity-aggregation>
 agg, err := client.Stats().Aggregation(ctx, marketaux.AggregationParams{
 	GroupBy: marketaux.GroupByIndustry,
 })
+if err != nil {
+	return err
+}
+for _, stat := range agg.Data {
+	fmt.Println(stat.Key, stat.TotalDocuments)
+}
 ```
 
 ### Trending entities — `Stats().Trending(ctx, TrendingParams)`
@@ -256,6 +357,9 @@ Docs: <https://www.marketaux.com/documentation#trending-aggregation>
 trending, err := client.Stats().Trending(ctx, marketaux.TrendingParams{
 	Countries: []string{"us"},
 })
+if err != nil {
+	return err
+}
 for _, e := range trending.Data {
 	fmt.Println(e.Key, e.Score)
 }
@@ -271,6 +375,12 @@ found, err := client.Entities().Search(ctx, marketaux.EntitySearchParams{
 	Search: "tesla",
 	Types:  []marketaux.EntityType{marketaux.EntityTypeEquity},
 })
+if err != nil {
+	return err
+}
+for _, entity := range found.Data {
+	fmt.Println(entity.Symbol, entity.Name, entity.Country)
+}
 ```
 
 ### Entity types — `Entities().Types(ctx)`
@@ -280,10 +390,29 @@ All supported entity types (`equity`, `index`, `etf`, `mutualfund`,
 safely as `EntityType`). Docs:
 <https://www.marketaux.com/documentation#entity-types>
 
+```go
+types, err := client.Entities().Types(ctx)
+if err != nil {
+	return err
+}
+fmt.Println(types)
+```
+
 ### Industries — `Entities().Industries(ctx)`
 
 All supported industries.
 Docs: <https://www.marketaux.com/documentation#entity-industries>
+
+```go
+industries, err := client.Entities().Industries(ctx)
+if err != nil {
+	return err
+}
+fmt.Println(industries)
+```
+
+Type and industry lists are good candidates for application-level caching;
+the SDK makes a request on every call.
 
 ### News sources — `Sources().All(ctx, SourcesParams)`
 
@@ -296,7 +425,47 @@ src, err := client.Sources().All(ctx, marketaux.SourcesParams{
 	DistinctDomain: marketaux.Bool(true),
 	Languages:      []string{"en"},
 })
+if err != nil {
+	return err
+}
+for _, source := range src.Data {
+	fmt.Println(source.Domain, source.Language)
+}
 ```
+
+## Reading Responses
+
+| Method | Result | Useful fields |
+| --- | --- | --- |
+| News feed / similar | `*NewsResponse` | `Meta`, `Data []Article` |
+| Article by UUID | `*Article` | `Title`, `Snippet`, `URL`, `PublishedAt`, `Entities`, `Similar` |
+| Intraday stats | `*TimeSeriesResponse` | `Data []TimeSeriesPoint`, each with `Date` and `Data []EntityStat` |
+| Stats aggregation | `*StatsResponse` | `Data []EntityStat`, `Meta.Returned`, `Meta.Limit` |
+| Trending | `*TrendingResponse` | `Data []TrendingEntity`, including `Score` and embedded `EntityStat` |
+| Entity search | `*EntitiesResponse` | `Data []EntityInfo`, `Meta` |
+| Sources | `*SourcesResponse` | `Data []Source`, `Meta` |
+| Types / industries | `[]EntityType` / `[]string` | Metadata values directly, without an envelope |
+
+`Meta.Found` describes the matching result set; it can be larger than the
+20,000-result pagination window. `Meta.Returned` describes this page and
+`Meta.Limit` is its effective size. Intraday stats have no `Meta` object.
+
+Dates decode into `time.Time`, including fractional seconds. Some values are
+optional: check `Article.RelevanceScore`, `Entity.Exchange`,
+`Entity.ExchangeLong` and `EntityStat.SentimentAvg` for `nil` before using
+them. `Source.SourceID` can also be `nil` with `DistinctDomain` enabled.
+Nullable text fields such as `Snippet` decode as an empty string. Empty and
+null collections are safe to range over, but a null collection may stay nil.
+
+Sentiment belongs to an entity mention; one article can have different scores
+for different companies. `Entity.IsPositive()` / `IsNegative()` are shortcuts
+for checking the sign. `Article.IsAbout("TSLA")` compares symbols without
+regard to case. `Highlight.Text()` removes `<em>` markers, unescapes entities
+and normalizes whitespace; escape its result when inserting it into HTML.
+
+Unknown entity types in responses are preserved. `Entity.TypeKnown()` or
+`EntityType.Valid()` tells you whether the SDK recognizes a value. Unknown
+JSON fields are ignored for forward compatibility.
 
 ## Params & Validation
 
@@ -328,6 +497,58 @@ with the date range, `published_after < published_before`, `sort_order` only
 with entity score sorts, `relevance_score` requires `search`, valid enums,
 and `page*limit <= 20000` (the API result-set bound).
 
+Non-finite floats (`NaN` and infinities), negative pagination values and a
+negative `MinMatchScore` are rejected too. Plan-specific limits and access
+permissions are checked by Marketaux, since the SDK does not know your plan.
+
+### Parameter reference
+
+| Go fields | Query parameters | Available in |
+| --- | --- | --- |
+| `Symbols`, `EntityTypes`, `Industries`, `Countries` | `symbols`, `entity_types`, `industries`, `countries` | News, similar, all stats |
+| `SentimentGTE`, `SentimentLTE` | `sentiment_gte`, `sentiment_lte` | News, similar, all stats |
+| `Domains`, `ExcludeDomains` | `domains`, `exclude_domains` | News, similar, all stats |
+| `SourceIDs`, `ExcludeSourceIDs` | `source_ids`, `exclude_source_ids` | News, similar, all stats |
+| `Languages` | `language` (singular) | News, similar, all stats, sources |
+| `PublishedBefore`, `PublishedAfter`, `PublishedOn` | `published_before`, `published_after`, `published_on` | News, similar, all stats |
+| `FilterEntities`, `MustHaveEntities`, `GroupSimilar` | `filter_entities`, `must_have_entities`, `group_similar` | News, similar |
+| `MinMatchScore` | `min_match_score` | News |
+| `Search` | `search` | News, all stats, entity search |
+| `Sort`, `SortOrder` | `sort`, `sort_order` | News, all stats; enum types differ |
+| `Limit` | `limit` | News, similar, all stats |
+| `Page` | `page` | News, similar, entity search, sources |
+| `GroupBy`, `MinDocCount` | `group_by`, `min_doc_count` | All stats |
+| `SentimentAvgGTE`, `SentimentAvgLTE` | `sentiment_avg_gte`, `sentiment_avg_lte` | All stats |
+| `Interval`, `DateOrder` | `interval`, `date_order` | Intraday stats |
+| `Search`, `Symbols`, `Exchanges`, `Types`, `Industries`, `Countries` | `search`, `symbols`, `exchanges`, `types`, `industries`, `countries` | Entity search |
+| `DistinctDomain` | `distinct_domain` | Sources |
+
+The exact field types are in the [Go reference](https://pkg.go.dev/github.com/tigusigalpa/marketaux-go).
+Similar news deliberately has its own params type: it does not accept the
+main feed's `Search`, `MinMatchScore`, `Sort` or `SortOrder` fields.
+
+`Countries` selects the country of an entity's exchange, while `Languages`
+selects the language of the news source. `FilterEntities` trims the entity
+list inside each article to your filters. `MustHaveEntities` requires an
+article to contain at least one recognized entity. `GroupSimilar` controls
+whether related articles are grouped into the article's `Similar` field.
+
+Omitted is different from false or zero:
+
+```go
+params := marketaux.NewsParams{
+	FilterEntities: marketaux.Bool(false), // explicitly send false
+	SentimentGTE:   marketaux.Float64(0),  // explicitly include neutral sentiment
+	PublishedOn:    marketaux.Date(2026, time.November, 1),
+}
+```
+
+Dates are `*time.Time`. `Time(t)` preserves an instant; `Date(y, m, d)` creates
+midnight UTC. Before/after values are converted to UTC and sent with second
+precision; `PublishedOn` sends the UTC calendar date. The API also accepts
+shorter date strings, but this SDK uses one canonical format. An upper bound
+at midnight does not include the rest of that day.
+
 Supported languages include `ar bg bn cs da de el en es et fa fi fr he hi hr
 hu id it ja ko lt multi nl no pl pt ro ru sk sv ta th tr uk vi zh` (`multi`
 = multilingual sources). The list may grow — the SDK does not hard-reject
@@ -353,17 +574,44 @@ Iteration stops at the last page (`returned < limit`), on empty data, at the
 you `break`. `Entities().Paginate` and `Sources().Paginate` work the same way
 with the fixed limit of 50.
 
-For eager collection use `News().AllPages(ctx, params, maxPages)`.
+The iterator starts at `params.Page`, or page 1 when it is zero. No request
+is made until iteration starts, and `break` does not prefetch another page.
+If your plan caps the requested size, the SDK follows `Meta.Limit` and uses
+that effective size for subsequent requests. It stops before the next page
+would exceed `page × limit <= 20000`; with a size of 3, the last allowed page
+is 6666. To explore more results, narrow the date range or other filters.
+
+For eager collection:
+
+```go
+articles, err := client.News().AllPages(ctx, marketaux.NewsParams{
+	Symbols: []string{"TSLA"},
+	Limit:   3,
+}, 5) // at most 5 pages
+if err != nil {
+	return err
+}
+fmt.Println(len(articles))
+```
+
+`maxPages <= 0` defaults to 400 pages, which may be fewer than the entire
+matching result set. `AllPages` holds the results in memory and discards
+partial results on error. With `Paginate`, you keep anything already handled.
+Each fetched page, and potentially each retry, uses another API request.
+Similar news supports manual pagination through `SimilarParams.Page`.
 
 ## Error Handling
 
-Every failure is a typed error usable with `errors.Is`/`errors.As`:
+Use `errors.Is` to choose what to do and `errors.As` to inspect details.
+Context cancellation and deadlines remain standard Go context errors:
 
 ```go
 page, err := client.News().All(ctx, params)
 switch {
 case err == nil:
-	// ok
+	fmt.Println(len(page.Data), "articles")
+case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	return err
 case errors.Is(err, marketaux.ErrRateLimit):
 	var apiErr *marketaux.APIError
 	if errors.As(err, &apiErr) {
@@ -387,6 +635,7 @@ default:
 | `ErrTransport` | network failures |
 | `ErrTimeout` | request timeouts |
 | `ErrDecode` | invalid JSON responses |
+| `ErrResponseTooLarge` | body exceeds `WithMaxResponseBytes`; also matches `ErrTransport` |
 | `ErrBadRequest` | 400 `malformed_parameters` |
 | `ErrUnauthorized` | 401 `invalid_api_token` |
 | `ErrUsageLimit` | 402 `usage_limit_reached` |
@@ -394,27 +643,61 @@ default:
 | `ErrNotFound` | 404 `resource_not_found` |
 | `ErrEndpointNotFound` | 404 `invalid_api_endpoint` |
 | `ErrRateLimit` | 429 `rate_limit_reached` |
-| `ErrServer` | 5xx `server_error` |
+| `ErrServer` | 5xx other than 503 |
 | `ErrMaintenance` | 503 `maintenance_mode` |
 
 `*APIError` exposes `StatusCode`, `Code`, `Message`, `URL` (redacted),
 `RequestID`, `RateLimitLimit`, `UsageLimitLimit`, `RetryAfter` and `Body`
-(truncated).
+(redacted, up to 2,000 bytes). `*DecodeError` includes a redacted body preview
+of up to 500 bytes. A response with valid JSON but an unexpected field type
+can also produce `ErrDecode`. Unfollowed redirects are `*APIError` values
+with their original 3xx status.
+
+A client timeout matches both `ErrTimeout` and `ErrTransport`. An expired
+caller context matches `context.DeadlineExceeded` instead. Check the context
+errors separately when deciding whether to retry at the application level.
 
 ## Retries & Rate Limits
 
-`DefaultRetryPolicy`: 3 attempts, 500 ms base delay, 8 s cap, full jitter.
+`DefaultRetryPolicy`: 3 attempts total, 500 ms base delay, 8 s backoff cap.
+Jitter chooses a delay between 50% and 100% of that backoff (equal jitter).
 Retried: `429`, `500`, `502`, `503`, `504` and network errors. Not retried:
-`4xx` (except 429), timeouts and canceled contexts. `Retry-After` (seconds or
+`4xx` (except 429), timeouts, oversized responses, decode errors and canceled
+contexts. `Retry-After` (seconds or
 HTTP-date) takes precedence when longer than the computed backoff.
+
+Copy the default policy before changing it, or use a policy with one attempt
+to disable retries:
+
+```go
+policy := marketaux.DefaultRetryPolicy
+policy.MaxAttempts = 4
+policy.BaseDelay = 250 * time.Millisecond
+client, err := marketaux.NewClient(token, marketaux.WithRetry(policy))
+if err != nil {
+	return err
+}
+// To disable: marketaux.WithRetry(marketaux.RetryPolicy{MaxAttempts: 1})
+```
+
+`MaxDelay` caps the SDK backoff; it does not shorten a longer `Retry-After`.
+A caller context deadline can interrupt either wait. Avoid stacking another
+automatic retry loop around the SDK without considering total attempts.
 
 The server reports limits in `X-RateLimit-Limit` (requests per 60 s, on 429)
 and `X-UsageLimit-Limit` (daily quota, on 402) — both land on `*APIError`.
 
 For preemptive throttling use `WithRateLimit(rps, burst)` — an in-process
-token bucket, safe for concurrent use.
+token bucket, safe for concurrent use. It applies to every attempt, including
+retries. It is local to this client instance; it does not coordinate separate
+processes or enforce a shared account's daily quota. Cancellation interrupts
+waiting without reserving future capacity. Retried requests can consume your
+daily quota, so choose a policy that fits your workload.
 
 ## Plans & Limits
+
+Monthly billing prices and limits checked on 17 November 2026. Pricing can
+change; confirm the current terms on the linked Marketaux pricing page.
 
 | Plan | Price/mo | Requests/day | Articles/req | Entities/stat req | Stats API |
 | --- | --- | --- | --- | --- | --- |
@@ -433,10 +716,17 @@ have a fixed page limit of 50. `page × limit` must stay ≤ 20 000.
 `Client` (and all services obtained from it) is immutable after construction
 and safe to share across goroutines. Verified under `go test -race`.
 
+Custom transports, log handlers and cookie jars must also support concurrent
+use. Do not modify the shared transport, `DefaultRetryPolicy`, or parameter
+slices/pointer values while requests use them. Responses belong to the caller.
+`CloseIdleConnections` releases idle connections in the underlying transport;
+it does not cancel active requests or permanently close the client. With a
+shared transport, this can also close its other idle connections.
+
 ## Testing
 
 ```bash
-go test ./...        # unit tests (httptest only, no network)
+go test ./...        # local HTTP test servers; no Marketaux calls
 go test -race ./...  # race detector
 make cover           # coverage report (≥90%)
 
@@ -445,9 +735,21 @@ MARKETAUX_API_TOKEN=... go test -tags=integration ./...
 MARKETAUX_API_TOKEN=... go run ./examples/smoke
 ```
 
+On PowerShell, set `$env:MARKETAUX_API_TOKEN` first and run the commands
+without the Unix-style assignment prefix. For coverage:
+
+```powershell
+go test -race '-coverprofile=coverage.out' '-covermode=atomic' .
+go tool cover '-func=coverage.out'
+```
+
+The coverage target measures the library package; example programs are built
+and checked separately. Live tests consume API requests and are skipped when
+no token is set. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+
 ## Compatibility
 
-Go 1.23–1.27, tested in CI on every supported minor version. `go.mod` has no
+The CI compatibility matrix covers Go 1.23–1.27. `go.mod` has no
 `require` directives — the module is standard library only. v1 keeps the
 public API backward compatible.
 
@@ -457,8 +759,40 @@ public API backward compatible.
   `Authorization` headers.
 - The token is masked (`api_token=***`) in `*APIError`/`TransportError`/
   `DecodeError` URLs and in debug logs.
+- Known token representations echoed in error messages, diagnostic body
+  previews and API error headers are redacted too. Original underlying error
+  identity is preserved for `errors.Is`/`errors.As`; take care when logging
+  custom transport errors obtained by unwrapping, or arbitrary response data.
+- Custom transports, HTTP tracing and proxy access logs see the real request
+  URL. Configure their logging to avoid recording the query token.
+- Use a patched Go toolchain and run `govulncheck ./...` regularly. Standard
+  library security updates still matter for a dependency-free SDK.
 - Never commit tokens; `.env` is gitignored.
 - Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
+
+## Troubleshooting
+
+| What you see | What to check |
+| --- | --- |
+| `ErrInvalidConfig` | Token is set; timeout is positive; `WithHTTPClient` precedes `WithTimeout` if the custom client has no timeout |
+| `ErrUnauthorized` | Token belongs to the intended account and has no surrounding whitespace |
+| `ErrForbidden` on stats | The account has access to that endpoint |
+| `ErrUsageLimit` | Daily quota; repeated retries will not restore it |
+| `ErrRateLimit` | Per-minute limit; lower RPS/burst and inspect `RetryAfter` |
+| Fewer articles than requested | Your plan can cap `Limit`; inspect `Meta.Limit` |
+| Empty results | Start with fewer filters, check UTC dates and the entity's exact symbol |
+| No debug logs | Supply `WithLogger`, enable debug in its handler, then set `WithDebug(true)` |
+| `ErrDecode` | Inspect the redacted preview; a proxy may have returned HTML or unexpected JSON |
+| `ErrResponseTooLarge` | Reduce result size or deliberately raise `WithMaxResponseBytes` |
+
+## Examples
+
+Runnable programs are in [examples/README.md](examples/README.md):
+[news](examples/news/main.go), [entities](examples/entities/main.go),
+[stats](examples/stats/main.go), [pagination](examples/pagination/main.go),
+[errors](examples/errors/main.go), and [smoke](examples/smoke/main.go).
+For example, after setting your token, run `go run ./examples/news` from this
+repository. Stats examples need access to the stats endpoints.
 
 ## Endpoint Documentation
 

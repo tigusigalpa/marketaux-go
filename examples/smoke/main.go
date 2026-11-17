@@ -22,7 +22,11 @@ func main() {
 		log.Fatal("set MARKETAUX_API_TOKEN")
 	}
 
-	client, err := marketaux.NewClient(token, marketaux.WithDebug(true))
+	var opts []marketaux.Option
+	if base := os.Getenv("MARKETAUX_BASE_URL"); base != "" {
+		opts = append(opts, marketaux.WithBaseURL(base))
+	}
+	client, err := marketaux.NewClient(token, opts...)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -5,7 +5,7 @@ Thank you for considering a contribution to marketaux-go.
 ## Requirements
 
 - Go 1.23 or newer
-- `golangci-lint` (`go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`)
+- `golangci-lint` v2 (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0`)
 - `govulncheck` (`go install golang.org/x/vuln/cmd/govulncheck@latest`)
 
 ## Workflow
@@ -32,6 +32,18 @@ Thank you for considering a contribution to marketaux-go.
 
 All tests must use `net/http/httptest` — tests never hit the real API.
 Fixtures live in `testdata/`.
+
+Custom `http.RoundTripper` implementations are also useful for simulating
+transport and response-body failures without network access. Run `govulncheck
+./...` with a current, patched Go toolchain: having no third-party dependencies
+does not remove vulnerabilities in the standard library.
+
+On PowerShell, quote arguments containing file names, for example:
+
+```powershell
+go test -race '-coverprofile=coverage.out' '-covermode=atomic' .
+go tool cover '-func=coverage.out'
+```
 
 ### Integration tests
 

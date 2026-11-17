@@ -2,6 +2,7 @@ package marketaux
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 )
@@ -27,12 +28,13 @@ func newRateLimiter(rps float64, burst int) *rateLimiter {
 	}
 }
 
-// reserve returns the duration the caller must wait before one token is
-// available at time now.
-func (l *rateLimiter) reserve(now time.Time) time.Duration {
+// reserve consumes an available token or reports when to try again.
+// Waiting callers do not borrow tokens, so cancellation leaves no debt.
+func (l *rateLimiter) reserve() time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	now := time.Now()
 	elapsed := now.Sub(l.last).Seconds()
 	l.last = now
 	l.tokens += elapsed * l.rps
@@ -43,23 +45,26 @@ func (l *rateLimiter) reserve(now time.Time) time.Duration {
 		l.tokens--
 		return 0
 	}
-	// Borrow from the future: report the deficit and move the refill clock
-	// forward so subsequent reservations queue behind this one.
 	deficit := 1 - l.tokens
-	l.tokens = 0
-	wait := time.Duration(deficit / l.rps * float64(time.Second))
-	l.last = now.Add(wait)
-	return wait
+	wait := math.Ceil(deficit / l.rps * float64(time.Second))
+	if wait >= float64(math.MaxInt64) {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(wait)
 }
 
 // wait blocks until a token is available or ctx is done.
 func (l *rateLimiter) wait(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		d := l.reserve()
+		if d <= 0 {
+			return nil
+		}
+		if err := sleep(ctx, d); err != nil {
+			return err
+		}
 	}
-	d := l.reserve(time.Now())
-	if d <= 0 {
-		return nil
-	}
-	return sleep(ctx, d)
 }

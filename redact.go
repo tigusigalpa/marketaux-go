@@ -1,22 +1,63 @@
 package marketaux
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 )
 
 const redacted = "***"
 
+// redactSecret also covers credentials echoed by servers and transports.
+func (c *Client) redactSecret(s string) string {
+	quoted, _ := json.Marshal(c.token)
+	return strings.NewReplacer(
+		url.QueryEscape(c.token), redacted,
+		url.PathEscape(c.token), redacted,
+		string(quoted[1:len(quoted)-1]), redacted,
+		c.token, redacted,
+	).Replace(s)
+}
+
+// diagnosticError preserves error identity while keeping its message safe.
+type diagnosticError struct {
+	err     error
+	message string
+}
+
+func (e *diagnosticError) Error() string { return e.message }
+func (e *diagnosticError) Unwrap() error { return e.err }
+
+func (c *Client) safeError(err error) error {
+	message := c.redactSecret(err.Error())
+	if message == err.Error() {
+		return err
+	}
+	return &diagnosticError{err: err, message: message}
+}
+
 // RedactURL returns raw with the api_token query parameter masked. It is used
 // for error messages and debug logging so the API token never leaks. Any
-// input that is not a parseable URL is returned with the token substring
-// masked as well.
+// input that is not a parseable URL is replaced with "[invalid URL]".
 func RedactURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return maskTokenParam(raw)
+		return "[invalid URL]"
 	}
-	q := u.Query()
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		parts := strings.Split(u.RawQuery, "&")
+		for i, part := range parts {
+			key, _, _ := strings.Cut(part, "=")
+			if decoded, decodeErr := url.QueryUnescape(key); decodeErr == nil && decoded == "api_token" {
+				parts[i] = key + "=" + url.QueryEscape(redacted)
+			} else {
+				parts[i] = maskTokenParam(part)
+			}
+		}
+		u.RawQuery = strings.Join(parts, "&")
+		return u.String()
+	}
 	if _, ok := q["api_token"]; !ok {
 		return u.String()
 	}

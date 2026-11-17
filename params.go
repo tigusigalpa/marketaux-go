@@ -2,6 +2,7 @@ package marketaux
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -199,7 +200,7 @@ func (v ve) err() error {
 }
 
 func (v ve) sentiment(field string, val *float64) {
-	if val != nil && (*val < -1 || *val > 1) {
+	if val != nil && (math.IsNaN(*val) || *val < -1 || *val > 1) {
 		v.add(field, "must be between -1 and 1")
 	}
 }
@@ -236,7 +237,8 @@ func (v ve) resultSet(page, limit int) {
 	if limit < 0 {
 		v.add("limit", "must be >= 0")
 	}
-	if page > 0 && limit > 0 && int64(page)*int64(limit) > maxResultSet {
+	effectivePage, effectiveLimit := max(page, 1), max(limit, 1)
+	if effectiveLimit > maxResultSet || effectivePage > maxResultSet/effectiveLimit {
 		v.add("page", "page*limit must not exceed 20000")
 	}
 }
@@ -246,6 +248,9 @@ func (p NewsParams) validate() error {
 	v := ve{}
 	v.sentiment("sentiment_gte", p.SentimentGTE)
 	v.sentiment("sentiment_lte", p.SentimentLTE)
+	if p.MinMatchScore != nil && (math.IsNaN(*p.MinMatchScore) || math.IsInf(*p.MinMatchScore, 0) || *p.MinMatchScore < 0) {
+		v.add("min_match_score", "must be finite and >= 0")
+	}
 	v.entityTypes("entity_types", p.EntityTypes)
 	v.publishedWindow(p.PublishedBefore, p.PublishedAfter, p.PublishedOn)
 	v.resultSet(p.Page, p.Limit)
@@ -477,9 +482,7 @@ func statsValues(q url.Values, groupBy GroupBy, minDocCount int,
 func (p EntitySearchParams) validate() error {
 	v := ve{}
 	v.entityTypes("types", p.Types)
-	if p.Page < 0 {
-		v.add("page", "must be >= 0")
-	}
+	v.resultSet(p.Page, 50)
 	return v.err()
 }
 
@@ -499,9 +502,7 @@ func (p EntitySearchParams) values() url.Values {
 // validate checks SourcesParams for client-side errors.
 func (p SourcesParams) validate() error {
 	v := ve{}
-	if p.Page < 0 {
-		v.add("page", "must be >= 0")
-	}
+	v.resultSet(p.Page, 50)
 	return v.err()
 }
 

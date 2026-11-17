@@ -5,126 +5,100 @@ import (
 	"iter"
 )
 
-// Paginate returns an iterator that lazily walks every page of the news feed
-// and yields articles one by one. Iteration stops at the end of the result
-// set, at the 20000-result API bound, on error, or when the consumer stops
-// ranging. Errors are delivered as the second yield value; after an error the
-// iterator terminates.
-//
-//	for article, err := range client.News().Paginate(ctx, params) {
-//		if err != nil {
-//			return err
-//		}
-//		fmt.Println(article.Title)
-//	}
+// Paginate returns an iterator that lazily walks the news feed and yields
+// articles one by one. It starts at p.Page (or 1), uses the server's actual
+// page size, and stops before the 20000-result bound, on error, or on break.
+// An error is yielded once, with a zero Article, then iteration stops.
 func (s *NewsService) Paginate(ctx context.Context, p NewsParams) iter.Seq2[Article, error] {
-	return func(yield func(Article, error) bool) {
-		page := p.Page
-		if page <= 0 {
-			page = 1
-		}
-		limit := p.Limit
-		for {
-			if err := ctx.Err(); err != nil {
-				yield(Article{}, err)
-				return
-			}
-			q := p
-			q.Page = page
-			resp, err := s.All(ctx, q)
-			if err != nil {
-				yield(Article{}, err)
-				return
-			}
-			for _, a := range resp.Data {
-				if !yield(a, nil) {
-					return
-				}
-			}
-			if limit <= 0 {
-				limit = resp.Meta.Limit
-			}
-			effective := limit
-			if effective <= 0 {
-				effective = resp.Meta.Returned
-			}
-			if len(resp.Data) == 0 || resp.Meta.Returned < effective ||
-				int64(page)*int64(effective) >= maxResultSet {
-				return
-			}
-			page++
-		}
-	}
+	return items(newsPages(ctx, s, p, 0))
 }
 
-// AllPages collects up to maxPages pages of news into a slice. It is a
-// convenience wrapper around All with a safeguard against unbounded result
-// sets. maxPages <= 0 means 400 pages, which cannot exceed the API bound of
-// 20000 results at the default page sizes.
+// AllPages collects up to maxPages pages, starting at p.Page (or 1).
+// maxPages <= 0 defaults to 400 pages; the 20000-result bound still applies.
+// If a request fails, it returns nil and the error, discarding partial data.
+// Use Paginate to process results as they arrive without storing every page.
 func (s *NewsService) AllPages(ctx context.Context, p NewsParams, maxPages int) ([]Article, error) {
 	if maxPages <= 0 {
 		maxPages = 400
 	}
-	page := p.Page
-	if page <= 0 {
-		page = 1
-	}
-	limit := p.Limit
 	var out []Article
-	for i := 0; i < maxPages; i++ {
-		q := p
-		q.Page = page
-		resp, err := s.All(ctx, q)
+	for batch, err := range newsPages(ctx, s, p, maxPages) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, resp.Data...)
-		if limit <= 0 {
-			limit = resp.Meta.Limit
-		}
-		effective := limit
-		if effective <= 0 {
-			effective = resp.Meta.Returned
-		}
-		if len(resp.Data) == 0 || resp.Meta.Returned < effective ||
-			int64(page)*int64(effective) >= maxResultSet {
-			break
-		}
-		page++
+		out = append(out, batch...)
 	}
 	return out, nil
 }
 
-// Paginate returns an iterator that lazily walks every page of entity search
-// results. The API fixes the page limit at 50.
+func newsPages(ctx context.Context, s *NewsService, p NewsParams, maxPages int) iter.Seq2[[]Article, error] {
+	return pages(ctx, p.Page, p.Limit, maxPages, func(page, limit int) ([]Article, Meta, error) {
+		q := p
+		q.Page, q.Limit = page, limit
+		resp, err := s.All(ctx, q)
+		if err != nil {
+			return nil, Meta{}, err
+		}
+		return resp.Data, resp.Meta, nil
+	})
+}
+
+// Paginate lazily walks entity search results, starting at p.Page (or 1).
+// It stops before the 20000-result bound. The API fixes the page size at 50.
 func (s *EntitiesService) Paginate(ctx context.Context, p EntitySearchParams) iter.Seq2[EntityInfo, error] {
-	return func(yield func(EntityInfo, error) bool) {
-		page := p.Page
-		if page <= 0 {
+	return items(pages(ctx, p.Page, 50, 0, func(page, _ int) ([]EntityInfo, Meta, error) {
+		q := p
+		q.Page = page
+		resp, err := s.Search(ctx, q)
+		if err != nil {
+			return nil, Meta{}, err
+		}
+		return resp.Data, resp.Meta, nil
+	}))
+}
+
+// Paginate lazily walks news sources, starting at p.Page (or 1).
+// It stops before the 20000-result bound. The API fixes the page size at 50.
+func (s *SourcesService) Paginate(ctx context.Context, p SourcesParams) iter.Seq2[Source, error] {
+	return items(pages(ctx, p.Page, 50, 0, func(page, _ int) ([]Source, Meta, error) {
+		q := p
+		q.Page = page
+		resp, err := s.All(ctx, q)
+		if err != nil {
+			return nil, Meta{}, err
+		}
+		return resp.Data, resp.Meta, nil
+	}))
+}
+
+// pages keeps pagination decisions identical across iterators and AllPages.
+func pages[T any](ctx context.Context, startPage, requestedLimit, maxPages int,
+	fetch func(int, int) ([]T, Meta, error)) iter.Seq2[[]T, error] {
+	return func(yield func([]T, error) bool) {
+		page, limit := startPage, requestedLimit
+		if page == 0 {
 			page = 1
 		}
-		for {
+		for fetched := 0; maxPages <= 0 || fetched < maxPages; fetched++ {
 			if err := ctx.Err(); err != nil {
-				yield(EntityInfo{}, err)
+				yield(nil, err)
 				return
 			}
-			q := p
-			q.Page = page
-			resp, err := s.Search(ctx, q)
+			data, meta, err := fetch(page, limit)
 			if err != nil {
-				yield(EntityInfo{}, err)
+				yield(nil, err)
 				return
 			}
-			for _, e := range resp.Data {
-				if !yield(e, nil) {
-					return
-				}
+			if len(data) == 0 || !yield(data, nil) {
+				return
 			}
-			limit := resp.Meta.Limit
+			if meta.Limit > 0 {
+				limit = meta.Limit
+			}
 			if limit <= 0 {
-				limit = 50
+				limit = max(meta.Returned, len(data))
 			}
-			if len(resp.Data) == 0 || resp.Meta.Returned < limit {
+			if meta.Returned < limit || page >= maxResultSet/limit {
 				return
 			}
 			page++
@@ -132,39 +106,19 @@ func (s *EntitiesService) Paginate(ctx context.Context, p EntitySearchParams) it
 	}
 }
 
-// Paginate returns an iterator that lazily walks every page of news sources.
-// The API fixes the page limit at 50.
-func (s *SourcesService) Paginate(ctx context.Context, p SourcesParams) iter.Seq2[Source, error] {
-	return func(yield func(Source, error) bool) {
-		page := p.Page
-		if page <= 0 {
-			page = 1
-		}
-		for {
-			if err := ctx.Err(); err != nil {
-				yield(Source{}, err)
-				return
-			}
-			q := p
-			q.Page = page
-			resp, err := s.All(ctx, q)
+func items[T any](batches iter.Seq2[[]T, error]) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for batch, err := range batches {
 			if err != nil {
-				yield(Source{}, err)
+				var zero T
+				yield(zero, err)
 				return
 			}
-			for _, src := range resp.Data {
-				if !yield(src, nil) {
+			for _, item := range batch {
+				if !yield(item, nil) {
 					return
 				}
 			}
-			limit := resp.Meta.Limit
-			if limit <= 0 {
-				limit = 50
-			}
-			if len(resp.Data) == 0 || resp.Meta.Returned < limit {
-				return
-			}
-			page++
 		}
 	}
 }

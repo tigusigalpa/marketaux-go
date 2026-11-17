@@ -2,6 +2,7 @@ package marketaux
 
 import (
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,13 +19,16 @@ func WithBaseURL(raw string) Option {
 	return func(c *Client) error {
 		u, err := url.Parse(raw)
 		if err != nil {
-			return &ConfigError{Field: "baseURL", Reason: err.Error()}
+			return &ConfigError{Field: "baseURL", Reason: "must be a valid URL"}
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
 			return &ConfigError{Field: "baseURL", Reason: "scheme must be http or https"}
 		}
 		if u.Host == "" {
 			return &ConfigError{Field: "baseURL", Reason: "host must not be empty"}
+		}
+		if u.User != nil {
+			return &ConfigError{Field: "baseURL", Reason: "must not contain user credentials"}
 		}
 		u.Path = strings.TrimSuffix(u.Path, "/")
 		u.RawQuery = ""
@@ -35,8 +39,9 @@ func WithBaseURL(raw string) Option {
 }
 
 // WithHTTPClient sets the HTTP client used for requests. The provided client
-// is not mutated; it is used as-is, so configure its Timeout and Transport
-// yourself. Use WithTimeout if you only need to change the timeout.
+// is shallow-copied, so its Transport and Jar remain shared. Configure a
+// positive Timeout, or use WithTimeout after this option. Redirects must stay
+// on the original origin, including when a custom CheckRedirect is provided.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) error {
 		if hc == nil {
@@ -72,6 +77,11 @@ func WithUserAgent(ua string) Option {
 		if strings.TrimSpace(ua) == "" {
 			return &ConfigError{Field: "userAgent", Reason: "must not be empty"}
 		}
+		for _, ch := range ua {
+			if ch < 32 || ch > 126 {
+				return &ConfigError{Field: "userAgent", Reason: "must contain only printable ASCII characters"}
+			}
+		}
 		c.userAgent = ua
 		return nil
 	}
@@ -93,8 +103,8 @@ func WithRetry(p RetryPolicy) Option {
 // burst requests at once and rps requests per second on average.
 func WithRateLimit(rps float64, burst int) Option {
 	return func(c *Client) error {
-		if rps <= 0 {
-			return &ConfigError{Field: "rateLimit.rps", Reason: "must be > 0"}
+		if rps <= 0 || math.IsNaN(rps) || math.IsInf(rps, 0) {
+			return &ConfigError{Field: "rateLimit.rps", Reason: "must be finite and > 0"}
 		}
 		if burst < 1 {
 			return &ConfigError{Field: "rateLimit.burst", Reason: "must be >= 1"}
