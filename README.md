@@ -308,7 +308,7 @@ changes one part of the client and is applied when `NewClient` runs:
 | `WithBaseURL(raw)` | `https://api.marketaux.com/v1` | Custom API base (tests, proxies) |
 | `WithHTTPClient(hc)` | `http.Client{Timeout: 30s}` | Shallow copy; transport and cookie jar stay shared |
 | `WithTimeout(d)` | `30s` | Timeout for each HTTP attempt, including reading its body |
-| `WithUserAgent(ua)` | `marketaux-go/1.0.0` | `User-Agent` header |
+| `WithUserAgent(ua)` | `marketaux-go/1.1.0` | `User-Agent` header |
 | `WithRetry(p)` | `DefaultRetryPolicy` | Retry policy, `MaxAttempts=1` disables |
 | `WithRateLimit(rps, burst)` | off | Client-side token bucket |
 | `WithLogger(l)` | discard | `*slog.Logger` for debug output |
